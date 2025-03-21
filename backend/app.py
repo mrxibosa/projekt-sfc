@@ -1,40 +1,32 @@
-from flask import Flask, jsonify
-from models import db, User, Lag
+from flask import Flask
+from models import db
+from routes.auth_routes import auth_routes
+from routes.user_routes import user_routes
+from routes.lag_routes import lag_routes
 import os
 
-# Initialize Flask application
-app = Flask(__name__)
+def create_app():
+    """Skapar och konfigurerar Flask-applikationen."""
+    app = Flask(__name__)
 
-# Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:admin@localhost:5432/solvaders_fc')
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    # Konfiguration
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
+        'DATABASE_URL', 'postgresql://postgres:admin@localhost:5432/solvaders_fc'
+    )
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "superhemlignyckel")
 
-# Initialize SQLAlchemy with the Flask app
-db.init_app(app)
+    # Initiera databas
+    db.init_app(app)
 
-# Route: Fetch all users
-@app.route('/users', methods=['GET'])
-def get_users():
-    try:
-        users = User.query.all()
-        return jsonify([{
-            "id": user.id,
-            "namn": user.namn,  # ändrat från username till namn
-            "email": user.email
-        } for user in users]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Registrera Blueprints
+    app.register_blueprint(auth_routes, url_prefix='/auth')
+    app.register_blueprint(user_routes, url_prefix='/users')
+    app.register_blueprint(lag_routes, url_prefix='/lag')
 
-
-# Route: Fetch all lag (ny endpoint)
-@app.route('/lag', methods=['GET'])
-def get_lag():
-    try:
-        lag = Lag.query.all()
-        return jsonify([l.serialize() for l in lag]), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return app
 
 if __name__ == '__main__':
+    app = create_app()
+    print(app.url_map)  # Debug: visar alla registrerade routes
     app.run(debug=True, host='0.0.0.0', port=5000)

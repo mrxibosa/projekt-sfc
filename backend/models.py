@@ -1,13 +1,20 @@
 from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
 
 class User(db.Model):
     __tablename__ = 'användare'
     id = db.Column("user_id", db.Integer, primary_key=True)
-    namn = db.Column("namn", db.String(255), nullable=False)
-    email = db.Column("email", db.String(255), unique=True, nullable=False)
-    lösenord_hash = db.Column("lösenord_hash", db.String, nullable=False)
+    namn = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=False)
+    lösenord_hash = db.Column(db.String, nullable=False)
+
+    def set_password(self, lösenord):
+        self.lösenord_hash = generate_password_hash(lösenord)
+
+    def check_password(self, lösenord):
+        return check_password_hash(self.lösenord_hash, lösenord)
 
     def serialize(self):
         return {
@@ -16,7 +23,6 @@ class User(db.Model):
             "email": self.email
         }
 
-# Lägg till denna klass nedan:
 class Lag(db.Model):
     __tablename__ = 'lag'
     id = db.Column(db.Integer, primary_key=True)
@@ -27,5 +33,5 @@ class Lag(db.Model):
         return {
             "id": self.id,
             "namn": self.namn,
-            "skapad_datum": self.skapad_datum.isoformat()
+            "skapad_datum": self.skapad_datum.isoformat() if self.skapad_datum else None
         }
