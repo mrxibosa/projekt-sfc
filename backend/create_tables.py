@@ -1,18 +1,13 @@
-from app import create_app  # Importera create_app-funktionen istället för en app-variabel
+from flask import Flask
 from models import db
-from sqlalchemy import text  # Viktigt! För att köra rå SQL i SQLAlchemy 2.x
+import os
 
-# Skapa en app-instans via create_app()
-app = create_app()
+app = Flask(__name__)
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:admin@localhost:5432/solvaders_fc')
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db.init_app(app)
 
 with app.app_context():
-    # Ta bort tabeller i rätt ordning (anpassa vid behov)
-    db.session.execute(text("DROP TABLE IF EXISTS träning CASCADE;"))
-    db.session.execute(text("DROP TABLE IF EXISTS lag CASCADE;"))
-    db.session.execute(text("DROP TABLE IF EXISTS användare CASCADE;"))
-
-    db.session.commit()  # Viktigt! Spara ändringar i databasen
-
-    # Skapa om alla tabeller
     db.create_all()
-    print("✅ Alla tabeller har skapats om!")
+    print("✅ Alla tabeller skapade eller uppdaterade!")
