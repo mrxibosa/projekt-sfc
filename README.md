@@ -83,6 +83,22 @@ Projekt SFC är en säker och användarvänlig webbplattform för fotbollsfören
 
 ---
 
+## 📌 Scope – Version 1 (MVP)
+Det här ingår i version 1 av projektet:
+- Stöd för rollerna: spelare, tränare, admin
+- Inloggning och registrering
+- Gästbok (med namn och meddelande)
+- Träningsschema per lag (visning)
+- Grundläggande webbgränssnitt med HTML/CSS
+- Allt versionhanteras med GitHub
+
+Funktioner som inte ingår i version 1:
+- Bildgalleri
+- Intern chatt
+- Betalning
+- Statistik
+- Mobilapp
+
 ## 🏗 7. GitHub-struktur
 /projekt-sfc ├── backend/ # Flask + SQL ├── frontend/ # HTML, CSS, JavaScript ├── database/ # MySQL-skript och ER-diagram ├── docs/ # Dokumentation & kravspecifikation ├── tests/ # Testkod och säkerhetstester ├── README.md # Dokumentation (du läser den nu!)
 
