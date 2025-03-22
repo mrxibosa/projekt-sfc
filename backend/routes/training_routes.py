@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from models import db, Träning, Lag
 from datetime import datetime
 from decorators import token_required, roles_required
+from utils.validators import validate_json, validate_date  # ✅ Importera validerare
 import logging
 
 # Create blueprint
@@ -11,49 +12,24 @@ training_routes = Blueprint('training_routes', __name__)
 logger = logging.getLogger(__name__)
 
 
-# Helper function for date parsing
-def parse_date(date_string):
-    try:
-        # Handle different date formats including with or without timezone
-        if date_string.endswith('Z'):
-            date_string = date_string.replace('Z', '+00:00')
-        return datetime.fromisoformat(date_string)
-    except ValueError as e:
-        logger.error(f"Date parsing error: {e}")
-        return None
-
-
 # ========== Training Routes ==========
 
 @training_routes.route('/', methods=['POST'])
 @token_required
 @roles_required(['admin', 'tränare', 'superadmin'])
+@validate_json(['lag_id', 'datum', 'typ'])
 def create_training(current_user):
-    """Create a new training session"""
     try:
         data = request.get_json()
 
-        # Validate request data
-        required_fields = ['lag_id', 'datum', 'typ']
-        missing_fields = [field for field in required_fields if field not in data]
-
-        if missing_fields:
-            return jsonify({
-                "error": "Missing required fields",
-                "fields": missing_fields
-            }), 400
-
-        # Parse date
-        training_date = parse_date(data['datum'])
+        training_date = validate_date(data['datum'])
         if not training_date:
-            return jsonify({"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"}), 400
+            return jsonify({"error": "Ogiltigt datumformat. Använd ISO-format (YYYY-MM-DDTHH:MM:SS)"}), 400
 
-        # Verify team exists
         team = Lag.query.get(data['lag_id'])
         if not team:
             return jsonify({"error": f"Team with ID {data['lag_id']} not found"}), 404
 
-        # Create new training session
         new_training = Träning(
             lag_id=data['lag_id'],
             datum=training_date,
@@ -79,12 +55,8 @@ def create_training(current_user):
 @training_routes.route('/', methods=['GET'])
 @token_required
 def get_all_trainings(current_user):
-    """Get all training sessions with optional filtering"""
     try:
-        # Support filtering by query parameters
         filters = {}
-
-        # Filter by team id if provided
         lag_id = request.args.get('lag_id')
         if lag_id:
             try:
@@ -92,44 +64,39 @@ def get_all_trainings(current_user):
             except ValueError:
                 return jsonify({"error": "Invalid lag_id parameter"}), 400
 
-        # Filter by training type if provided
         typ = request.args.get('typ')
         if typ:
             filters['typ'] = typ
 
-        # Apply date filtering if provided
         query = Träning.query.filter_by(**filters)
 
         from_date = request.args.get('from_date')
         to_date = request.args.get('to_date')
 
         if from_date:
-            from_date_obj = parse_date(from_date)
+            from_date_obj = validate_date(from_date)
             if from_date_obj:
                 query = query.filter(Träning.datum >= from_date_obj)
 
         if to_date:
-            to_date_obj = parse_date(to_date)
+            to_date_obj = validate_date(to_date)
             if to_date_obj:
                 query = query.filter(Träning.datum <= to_date_obj)
 
-        # Apply sorting
         sort_by = request.args.get('sort_by', 'datum')
         sort_order = request.args.get('sort_order', 'asc')
 
         if sort_by not in ['datum', 'id', 'lag_id', 'typ', 'närvaro']:
-            sort_by = 'datum'  # Default sort
+            sort_by = 'datum'
 
         if sort_order.lower() == 'desc':
             query = query.order_by(getattr(Träning, sort_by).desc())
         else:
             query = query.order_by(getattr(Träning, sort_by).asc())
 
-        # Get paginated results
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         pagination = query.paginate(page=page, per_page=per_page)
-
         trainings = pagination.items
 
         return jsonify({
@@ -147,7 +114,6 @@ def get_all_trainings(current_user):
 @training_routes.route('/<int:training_id>', methods=['GET'])
 @token_required
 def get_training(current_user, training_id):
-    """Get a specific training session by ID"""
     try:
         training = Träning.query.get_or_404(training_id)
         return jsonify({"training": training.serialize()}), 200
@@ -159,28 +125,22 @@ def get_training(current_user, training_id):
 @training_routes.route('/lag/<int:lag_id>', methods=['GET'])
 @token_required
 def get_team_trainings(current_user, lag_id):
-    """Get all training sessions for a specific team"""
     try:
-        # Verify team exists
         team = Lag.query.get_or_404(lag_id)
-
-        # Get paginated results
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
-
-        # Apply filtering
         query = Träning.query.filter_by(lag_id=lag_id)
 
         from_date = request.args.get('from_date')
         to_date = request.args.get('to_date')
 
         if from_date:
-            from_date_obj = parse_date(from_date)
+            from_date_obj = validate_date(from_date)
             if from_date_obj:
                 query = query.filter(Träning.datum >= from_date_obj)
 
         if to_date:
-            to_date_obj = parse_date(to_date)
+            to_date_obj = validate_date(to_date)
             if to_date_obj:
                 query = query.filter(Träning.datum <= to_date_obj)
 
@@ -188,7 +148,6 @@ def get_team_trainings(current_user, lag_id):
         if typ:
             query = query.filter(Träning.typ == typ)
 
-        # Apply sorting
         sort_by = request.args.get('sort_by', 'datum')
         sort_order = request.args.get('sort_order', 'asc')
 
@@ -217,16 +176,14 @@ def get_team_trainings(current_user, lag_id):
 @token_required
 @roles_required(['admin', 'tränare', 'superadmin'])
 def update_training(current_user, training_id):
-    """Update a specific training session"""
     try:
         training = Träning.query.get_or_404(training_id)
         data = request.get_json()
 
-        # Update fields if they exist in the request
         if 'datum' in data:
-            training_date = parse_date(data['datum'])
+            training_date = validate_date(data['datum'])
             if not training_date:
-                return jsonify({"error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"}), 400
+                return jsonify({"error": "Ogiltigt datumformat. Använd ISO-format (YYYY-MM-DDTHH:MM:SS)"}), 400
             training.datum = training_date
 
         if 'typ' in data:
@@ -235,7 +192,6 @@ def update_training(current_user, training_id):
         if 'närvaro' in data:
             training.närvaro = data['närvaro']
 
-        # Optionally allow changing the team
         if 'lag_id' in data:
             team = Lag.query.get(data['lag_id'])
             if not team:
@@ -258,14 +214,11 @@ def update_training(current_user, training_id):
 @training_routes.route('/<int:training_id>/narvaro', methods=['POST'])
 @token_required
 @roles_required(['admin', 'tränare', 'superadmin'])
+@validate_json(['närvaro'])
 def record_attendance(current_user, training_id):
-    """Record attendance for a specific training session"""
     try:
         training = Träning.query.get_or_404(training_id)
         data = request.get_json()
-
-        if 'närvaro' not in data:
-            return jsonify({"error": "Field 'närvaro' is required"}), 400
 
         try:
             närvaro = int(data['närvaro'])
@@ -291,7 +244,6 @@ def record_attendance(current_user, training_id):
 @token_required
 @roles_required(['admin', 'superadmin'])
 def delete_training(current_user, training_id):
-    """Delete a specific training session"""
     try:
         training = Träning.query.get_or_404(training_id)
         db.session.delete(training)
@@ -302,4 +254,4 @@ def delete_training(current_user, training_id):
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error deleting training session {training_id}: {str(e)}")
-        return jsonify({"error": "An error occurred while deleting the training session"})
+        return jsonify({"error": "An error occurred while deleting the training session"}), 500

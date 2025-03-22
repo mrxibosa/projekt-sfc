@@ -1,17 +1,10 @@
+# config.py
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv()  # 🔁 Laddar alla variabler från .env-filen
 
-class BaseConfig:
+class Config:
+    SECRET_KEY = os.getenv("SECRET_KEY", "default_secret")
+    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///default.db")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SECRET_KEY = os.getenv("SECRET_KEY", "superhemlignyckel")
-
-class DevelopmentConfig(BaseConfig):
-    SQLALCHEMY_DATABASE_URI = os.getenv(
-        "DATABASE_URL",
-        "postgresql://postgres:admin@localhost:5432/solvaders_fc"
-    )
-
-class ProductionConfig(BaseConfig):
-    SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL")

@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from models import db  # Import your database instance from models.py
 import os
-
+from utils.error_handlers import register_error_handlers  # Import the error handlers
 
 def create_app():
     """Factory method to create and configure the Flask application."""
@@ -23,6 +23,9 @@ def create_app():
     # Initialize the database and Flask-Migrate
     db.init_app(app)
     migrate = Migrate(app, db)
+
+    # Register error handlers
+    register_error_handlers(app)
 
     # Register Blueprints for different routes
     from routes.auth_routes import auth_routes
