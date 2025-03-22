@@ -1,117 +1,116 @@
 from flask_sqlalchemy import SQLAlchemy
-from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
+from werkzeug.security import generate_password_hash
 
-# Initialize the database instance
+# Skapa databas-instans
 db = SQLAlchemy()
 
-# 🔹 Many-to-Many relationship between User and Lag
-user_lag = db.Table(
-    'user_lag',
-    db.Column('user_id', db.Integer, db.ForeignKey('användare.user_id'), primary_key=True),
-    db.Column('lag_id', db.Integer, db.ForeignKey('lag.lag_id'), primary_key=True),
-    db.Column('roll', db.String(50), nullable=False, default='spelare'),  # E.g., 'tränare', 'spelare'
-    db.Column('position', db.String(100), nullable=True),  # E.g., 'anfallare', 'målvakt'
-    db.Column('skapad_datum', db.DateTime, default=datetime.utcnow)  # When the role was assigned
-)
+# Associationstabell för många-till-många relation mellan User och Lag
+user_lag = db.Table('user_lag',
+                    db.Column('user_id', db.Integer, db.ForeignKey('users.id'), primary_key=True),
+                    db.Column('lag_id', db.Integer, db.ForeignKey('lag.id'), primary_key=True)
+                    )
 
-# 🟢 User Model
+
 class User(db.Model):
-    __tablename__ = 'användare'
+    """Användarmodell för systemet"""
+    __tablename__ = 'users'
 
-    id = db.Column("user_id", db.Integer, primary_key=True)
-    namn = db.Column(db.String(255), nullable=False)
-    email = db.Column(db.String(255), unique=True, nullable=False)
-    lösenord_hash = db.Column(db.String, nullable=False)
-    roll = db.Column(db.String(50), nullable=False, default="spelare")  # Default role
+    id = db.Column(db.Integer, primary_key=True)
+    förnamn = db.Column(db.String(50), nullable=False)
+    efternamn = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(100), unique=True, nullable=False)
+    lösenord_hash = db.Column(db.String(200), nullable=False)
+    telefon = db.Column(db.String(20), nullable=True)
+    roll = db.Column(db.String(20), default='spelare')  # spelare, tränare, admin
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    lag = db.relationship('Lag', secondary=user_lag, back_populates='medlemmar')
+    # Relationer till andra tabeller
+    # Fixad relation som specificerar foreign_keys
+    träningar = db.relationship('Träning', backref='användare', lazy=True, foreign_keys='Träning.user_id')
 
-    def set_password(self, lösenord):
-        """ Hashar och sparar lösenordet """
+    def __init__(self, förnamn, efternamn, email, lösenord, telefon=None, roll='spelare'):
+        self.förnamn = förnamn
+        self.efternamn = efternamn
+        self.email = email
         self.lösenord_hash = generate_password_hash(lösenord)
+        self.telefon = telefon
+        self.roll = roll
 
-    def check_password(self, lösenord):
-        """ Jämför inskrivet lösenord med det hashade lösenordet """
-        return check_password_hash(self.lösenord_hash, lösenord)
+    def __repr__(self):
+        return f'<User {self.förnamn} {self.efternamn}>'
 
+    # Lägg till serialize-metod för API-svar
     def serialize(self):
-        """ Returnerar användaren i JSON-format """
         return {
-            "id": self.id,
-            "namn": self.namn,
-            "email": self.email,
-            "roll": self.roll
+            'id': self.id,
+            'förnamn': self.förnamn,
+            'efternamn': self.efternamn,
+            'email': self.email,
+            'telefon': self.telefon,
+            'roll': self.roll
         }
 
 
-# 🔹 Lag Model
 class Lag(db.Model):
+    """Modell för lag"""
     __tablename__ = 'lag'
 
-    id = db.Column("lag_id", db.Integer, primary_key=True)
-    namn = db.Column(db.String(255), nullable=False, unique=True)
-    skapad_datum = db.Column(db.DateTime, server_default=db.func.now())
+    id = db.Column(db.Integer, primary_key=True)
+    namn = db.Column(db.String(100), nullable=False)
+    beskrivning = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    medlemmar = db.relationship('User', secondary=user_lag, back_populates='lag')
+    # Relationer
+    medlemmar = db.relationship('User', secondary=user_lag, backref=db.backref('lag', lazy='dynamic'))
+    träningar = db.relationship('Träning', backref='lag', lazy=True)
 
-    def serialize(self):
-        """ Returnerar laget i JSON-format utan medlemmar """
-        return {
-            "id": self.id,
-            "namn": self.namn,
-            "skapad_datum": self.skapad_datum.strftime('%Y-%m-%d %H:%M:%S')
-        }
-
-    def serialize_with_members(self):
-        """ Returnerar laget i JSON-format med medlemmar """
-        return {
-            **self.serialize(),
-            "medlemmar": [user.serialize() for user in self.medlemmar]
-        }
+    def __repr__(self):
+        return f'<Lag {self.namn}>'
 
 
-# 🔥 Match Model
 class Match(db.Model):
+    """Modell för matcher"""
     __tablename__ = 'matcher'
 
-    id = db.Column("match_id", db.Integer, primary_key=True)
-    lag_id = db.Column(db.Integer, db.ForeignKey('lag.lag_id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    hemmalag_id = db.Column(db.Integer, db.ForeignKey('lag.id'), nullable=False)
+    bortalag_id = db.Column(db.Integer, db.ForeignKey('lag.id'), nullable=False)
     datum = db.Column(db.DateTime, nullable=False)
-    plats = db.Column(db.String(255), nullable=False)
-    motståndarlag = db.Column(db.String(255), nullable=False)
+    plats = db.Column(db.String(100), nullable=False)
+    resultat_hemma = db.Column(db.Integer, nullable=True)
+    resultat_borta = db.Column(db.Integer, nullable=True)
 
-    lag = db.relationship('Lag', backref=db.backref('matcher', lazy=True))
+    # Relationer
+    hemmalag = db.relationship('Lag', foreign_keys=[hemmalag_id])
+    bortalag = db.relationship('Lag', foreign_keys=[bortalag_id])
 
-    def serialize(self):
-        """ Returnerar matchen i JSON-format """
-        return {
-            "id": self.id,
-            "lag": self.lag.namn,
-            "datum": self.datum.strftime('%Y-%m-%d %H:%M:%S'),
-            "plats": self.plats,
-            "motståndarlag": self.motståndarlag
-        }
+    def __repr__(self):
+        return f'<Match {self.hemmalag_id} vs {self.bortalag_id} at {self.datum}>'
 
 
-# 🔥 Träning Model
 class Träning(db.Model):
+    """Modell för träningar"""
     __tablename__ = 'träningar'
 
-    id = db.Column("träning_id", db.Integer, primary_key=True)
-    lag_id = db.Column(db.Integer, db.ForeignKey('lag.lag_id'), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    lag_id = db.Column(db.Integer, db.ForeignKey('lag.id'), nullable=False)
+    # Lägg till foreign key för användare
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     datum = db.Column(db.DateTime, nullable=False)
-    typ = db.Column(db.String(100), nullable=False)  # E.g., "Fys", "Teknik", "Spelövningar"
-    närvaro = db.Column(db.Integer, default=0)  # Antal närvarande spelare
+    plats = db.Column(db.String(100), nullable=False)
+    beskrivning = db.Column(db.Text, nullable=True)
 
-    lag = db.relationship('Lag', backref=db.backref('träningar', lazy=True))
+    def __repr__(self):
+        return f'<Träning för lag {self.lag_id} den {self.datum}>'
 
+    # Lägg till serialize-metod för API-svar
     def serialize(self):
-        """ Returnerar träningen i JSON-format """
         return {
-            "id": self.id,
-            "lag": self.lag.namn,
-            "datum": self.datum.strftime('%Y-%m-%d %H:%M:%S'),
-            "typ": self.typ,
-            "närvaro": self.närvaro
+            'id': self.id,
+            'lag_id': self.lag_id,
+            'user_id': self.user_id,
+            'datum': self.datum.isoformat() if self.datum else None,
+            'plats': self.plats,
+            'beskrivning': self.beskrivning
         }

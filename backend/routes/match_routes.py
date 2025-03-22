@@ -1,220 +1,192 @@
 from flask import Blueprint, request, jsonify
 from models import db, Match, Lag
+from utils.token_utils import token_required, roles_required
+from utils.validators import validate_json
 from datetime import datetime
-from decorators import token_required, roles_required
-from utils.validators import validate_json, validate_date  # ✅ Importera validerare
-import logging
 
-# Create blueprint
+# VIKTIGT: Variabeln måste heta exakt "match_routes"
 match_routes = Blueprint('match_routes', __name__)
 
-# Set up logging
-logger = logging.getLogger(__name__)
 
-# ========== Match Routes ==========
+@match_routes.route('/', methods=['GET'])
+def get_all_matches():
+    """Hämta alla matcher"""
+    try:
+        matches = Match.query.all()
+        result = []
+
+        for match in matches:
+            # Hämta lagnamn
+            hemmalag = Lag.query.get(match.hemmalag_id)
+            bortalag = Lag.query.get(match.bortalag_id)
+
+            result.append({
+                'id': match.id,
+                'hemmalag_id': match.hemmalag_id,
+                'hemmalag_namn': hemmalag.namn if hemmalag else None,
+                'bortalag_id': match.bortalag_id,
+                'bortalag_namn': bortalag.namn if bortalag else None,
+                'datum': match.datum.isoformat() if match.datum else None,
+                'plats': match.plats,
+                'resultat_hemma': match.resultat_hemma,
+                'resultat_borta': match.resultat_borta
+            })
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Ett fel inträffade: {str(e)}"}), 500
+
+
+@match_routes.route('/<int:match_id>', methods=['GET'])
+def get_match(match_id):
+    """Hämta en specifik match baserat på ID"""
+    try:
+        match = Match.query.get_or_404(match_id)
+
+        # Hämta lagnamn
+        hemmalag = Lag.query.get(match.hemmalag_id)
+        bortalag = Lag.query.get(match.bortalag_id)
+
+        return jsonify({
+            'id': match.id,
+            'hemmalag_id': match.hemmalag_id,
+            'hemmalag_namn': hemmalag.namn if hemmalag else None,
+            'bortalag_id': match.bortalag_id,
+            'bortalag_namn': bortalag.namn if bortalag else None,
+            'datum': match.datum.isoformat() if match.datum else None,
+            'plats': match.plats,
+            'resultat_hemma': match.resultat_hemma,
+            'resultat_borta': match.resultat_borta
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": f"Ett fel inträffade: {str(e)}"}), 500
+
 
 @match_routes.route('/', methods=['POST'])
 @token_required
-@roles_required(['admin', 'tränare', 'superadmin'])
-@validate_json(['lag_id', 'datum', 'plats', 'motståndarlag'])
+@roles_required(['admin', 'tränare'])
+@validate_json(['hemmalag_id', 'bortalag_id', 'datum', 'plats'])
 def create_match(current_user):
-    """Create a new match"""
+    """Skapa en ny match"""
     try:
         data = request.get_json()
 
-        # Validate date
-        match_date = validate_date(data['datum'])
-        if not match_date:
-            return jsonify({"error": "Ogiltigt datumformat. Använd ISO-format (YYYY-MM-DDTHH:MM:SS)"}), 400
+        # Kontrollera att lagen finns
+        hemmalag = Lag.query.get(data['hemmalag_id'])
+        bortalag = Lag.query.get(data['bortalag_id'])
 
-        # Verify team exists
-        team = Lag.query.get(data['lag_id'])
-        if not team:
-            return jsonify({"error": f"Team with ID {data['lag_id']} not found"}), 404
+        if not hemmalag or not bortalag:
+            return jsonify({'error': 'Ett eller båda lagen finns inte'}), 400
 
-        # Create new match
-        new_match = Match(
-            lag_id=data['lag_id'],
-            datum=match_date,
+        # Konvertera datum-sträng till datetime
+        try:
+            datum = datetime.fromisoformat(data['datum'].replace('Z', '+00:00'))
+        except ValueError:
+            return jsonify({'error': 'Ogiltigt datumformat, använd ISO 8601 (YYYY-MM-DDTHH:MM:SS)'}), 400
+
+        # Skapa ny match
+        ny_match = Match(
+            hemmalag_id=data['hemmalag_id'],
+            bortalag_id=data['bortalag_id'],
+            datum=datum,
             plats=data['plats'],
-            motståndarlag=data['motståndarlag']
+            resultat_hemma=data.get('resultat_hemma'),
+            resultat_borta=data.get('resultat_borta')
         )
 
-        db.session.add(new_match)
+        db.session.add(ny_match)
         db.session.commit()
 
-        logger.info(f"Match created: {new_match.id} for team {team.namn}")
         return jsonify({
-            "message": "Match created successfully",
-            "match": new_match.serialize()
+            'message': 'Match skapad',
+            'match': {
+                'id': ny_match.id,
+                'hemmalag_id': ny_match.hemmalag_id,
+                'bortalag_id': ny_match.bortalag_id,
+                'datum': ny_match.datum.isoformat() if ny_match.datum else None,
+                'plats': ny_match.plats,
+                'resultat_hemma': ny_match.resultat_hemma,
+                'resultat_borta': ny_match.resultat_borta
+            }
         }), 201
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error creating match: {str(e)}")
-        return jsonify({"error": "An error occurred while creating the match"}), 500
-
-
-@match_routes.route('/', methods=['GET'])
-@token_required
-def get_all_matches(current_user):
-    """Get all matches with optional filtering"""
-    try:
-        filters = {}
-        lag_id = request.args.get('lag_id')
-        if lag_id:
-            try:
-                filters['lag_id'] = int(lag_id)
-            except ValueError:
-                return jsonify({"error": "Invalid lag_id parameter"}), 400
-
-        from_date = request.args.get('from_date')
-        to_date = request.args.get('to_date')
-        query = Match.query.filter_by(**filters)
-
-        if from_date:
-            from_date_obj = validate_date(from_date)
-            if from_date_obj:
-                query = query.filter(Match.datum >= from_date_obj)
-
-        if to_date:
-            to_date_obj = validate_date(to_date)
-            if to_date_obj:
-                query = query.filter(Match.datum <= to_date_obj)
-
-        sort_by = request.args.get('sort_by', 'datum')
-        sort_order = request.args.get('sort_order', 'asc')
-        if sort_by not in ['datum', 'id', 'lag_id', 'plats', 'motståndarlag']:
-            sort_by = 'datum'
-        if sort_order.lower() == 'desc':
-            query = query.order_by(getattr(Match, sort_by).desc())
-        else:
-            query = query.order_by(getattr(Match, sort_by).asc())
-
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
-        pagination = query.paginate(page=page, per_page=per_page)
-        matches = pagination.items
-
-        return jsonify({
-            "matches": [match.serialize() for match in matches],
-            "total": pagination.total,
-            "pages": pagination.pages,
-            "current_page": page
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error retrieving matches: {str(e)}")
-        return jsonify({"error": "An error occurred while retrieving matches"}), 500
-
-
-@match_routes.route('/<int:match_id>', methods=['GET'])
-@token_required
-def get_match(current_user, match_id):
-    try:
-        match = Match.query.get_or_404(match_id)
-        return jsonify({"match": match.serialize()}), 200
-    except Exception as e:
-        logger.error(f"Error retrieving match {match_id}: {str(e)}")
-        return jsonify({"error": "An error occurred while retrieving the match"}), 500
-
-
-@match_routes.route('/lag/<int:lag_id>', methods=['GET'])
-@token_required
-def get_team_matches(current_user, lag_id):
-    try:
-        team = Lag.query.get_or_404(lag_id)
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 20, type=int)
-        query = Match.query.filter_by(lag_id=lag_id)
-
-        from_date = request.args.get('from_date')
-        to_date = request.args.get('to_date')
-
-        if from_date:
-            from_date_obj = validate_date(from_date)
-            if from_date_obj:
-                query = query.filter(Match.datum >= from_date_obj)
-
-        if to_date:
-            to_date_obj = validate_date(to_date)
-            if to_date_obj:
-                query = query.filter(Match.datum <= to_date_obj)
-
-        sort_by = request.args.get('sort_by', 'datum')
-        sort_order = request.args.get('sort_order', 'asc')
-        if sort_order.lower() == 'desc':
-            query = query.order_by(getattr(Match, sort_by).desc())
-        else:
-            query = query.order_by(getattr(Match, sort_by).asc())
-
-        pagination = query.paginate(page=page, per_page=per_page)
-        matches = pagination.items
-
-        return jsonify({
-            "team": team.namn,
-            "matches": [match.serialize() for match in matches],
-            "total": pagination.total,
-            "pages": pagination.pages,
-            "current_page": page
-        }), 200
-
-    except Exception as e:
-        logger.error(f"Error retrieving matches for team {lag_id}: {str(e)}")
-        return jsonify({"error": "An error occurred while retrieving team matches"}), 500
+        return jsonify({"error": f"Ett fel inträffade: {str(e)}"}), 500
 
 
 @match_routes.route('/<int:match_id>', methods=['PUT'])
 @token_required
-@roles_required(['admin', 'tränare', 'superadmin'])
+@roles_required(['admin', 'tränare'])
 def update_match(current_user, match_id):
+    """Uppdatera en befintlig match"""
     try:
         match = Match.query.get_or_404(match_id)
         data = request.get_json()
 
+        # Uppdatera fält om de finns i data
+        if 'hemmalag_id' in data:
+            # Kontrollera att laget finns
+            if not Lag.query.get(data['hemmalag_id']):
+                return jsonify({'error': 'Hemmalaget finns inte'}), 400
+            match.hemmalag_id = data['hemmalag_id']
+
+        if 'bortalag_id' in data:
+            # Kontrollera att laget finns
+            if not Lag.query.get(data['bortalag_id']):
+                return jsonify({'error': 'Bortalaget finns inte'}), 400
+            match.bortalag_id = data['bortalag_id']
+
         if 'datum' in data:
-            match_date = validate_date(data['datum'])
-            if not match_date:
-                return jsonify({"error": "Ogiltigt datumformat. Använd ISO-format (YYYY-MM-DDTHH:MM:SS)"}), 400
-            match.datum = match_date
+            try:
+                match.datum = datetime.fromisoformat(data['datum'].replace('Z', '+00:00'))
+            except ValueError:
+                return jsonify({'error': 'Ogiltigt datumformat, använd ISO 8601 (YYYY-MM-DDTHH:MM:SS)'}), 400
 
         if 'plats' in data:
             match.plats = data['plats']
 
-        if 'motståndarlag' in data:
-            match.motståndarlag = data['motståndarlag']
+        if 'resultat_hemma' in data:
+            match.resultat_hemma = data['resultat_hemma']
 
-        if 'lag_id' in data:
-            team = Lag.query.get(data['lag_id'])
-            if not team:
-                return jsonify({"error": f"Team with ID {data['lag_id']} not found"}), 404
-            match.lag_id = data['lag_id']
+        if 'resultat_borta' in data:
+            match.resultat_borta = data['resultat_borta']
 
         db.session.commit()
-        logger.info(f"Match updated: {match.id}")
+
         return jsonify({
-            "message": "Match updated successfully",
-            "match": match.serialize()
+            'message': 'Match uppdaterad',
+            'match': {
+                'id': match.id,
+                'hemmalag_id': match.hemmalag_id,
+                'bortalag_id': match.bortalag_id,
+                'datum': match.datum.isoformat() if match.datum else None,
+                'plats': match.plats,
+                'resultat_hemma': match.resultat_hemma,
+                'resultat_borta': match.resultat_borta
+            }
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error updating match {match_id}: {str(e)}")
-        return jsonify({"error": "An error occurred while updating the match"}), 500
+        return jsonify({"error": f"Ett fel inträffade: {str(e)}"}), 500
 
 
 @match_routes.route('/<int:match_id>', methods=['DELETE'])
 @token_required
-@roles_required(['admin', 'superadmin'])
+@roles_required(['admin'])
 def delete_match(current_user, match_id):
+    """Ta bort en match"""
     try:
         match = Match.query.get_or_404(match_id)
+
         db.session.delete(match)
         db.session.commit()
-        logger.info(f"Match deleted: {match_id}")
-        return jsonify({"message": "Match deleted successfully"}), 200
+
+        return jsonify({'message': f'Match med ID {match_id} har tagits bort'}), 200
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error deleting match {match_id}: {str(e)}")
-        return jsonify({"error": "An error occurred while deleting the match"}), 500
+        return jsonify({"error": f"Ett fel inträffade: {str(e)}"}), 500

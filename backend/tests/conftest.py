@@ -1,38 +1,81 @@
-# tests/conftest.py
-import os
-import sys
-
-# Lägg till backend-mappen i sys.path
-# Denna fil (conftest.py) ligger i backend/tests, så vi flyttar en nivå upp.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 import pytest
-from app import create_app, db  # Nu bör modulen hittas
-from models import User
+from app import create_app
+from models import db, User
+from werkzeug.security import generate_password_hash
+import os
 
-@pytest.fixture
+
+@pytest.fixture(scope='function')
 def app():
-    app = create_app()
-    app.config.update({
-        "TESTING": True,
-        "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
-        "SQLALCHEMY_TRACK_MODIFICATIONS": False
-    })
+    """Skapa och konfigurera Flask-applikation för testning"""
+    # Använd en separat testdatabas för PostgreSQL
+    os.environ['TEST_DATABASE_URL'] = 'postgresql://postgres:admin@localhost:5432/solvaders_fc_test'
 
+    # Skapa app med testflaggan
+    app = create_app(testing=True)
+
+    # Skapa testdatabasstrukturen
     with app.app_context():
+        db.drop_all()  # Rensa befintliga tabeller först
         db.create_all()
-        yield app
+
+        # Skapa testdata: admin-användare
+        admin = User(
+            förnamn="Admin",
+            efternamn="Testsson",
+            email="admin@test.com",
+            lösenord="Testpassword1",
+            roll="admin"
+        )
+
+        # Vanlig användare
+        user = User(
+            förnamn="Vanlig",
+            efternamn="Användarsson",
+            email="user@test.com",
+            lösenord="Testpassword1",
+            roll="spelare"
+        )
+
+        db.session.add(admin)
+        db.session.add(user)
+        db.session.commit()
+
+    yield app
+
+    # Rensa databasen efter testet
+    with app.app_context():
         db.session.remove()
         db.drop_all()
 
-@pytest.fixture
+
+@pytest.fixture(scope='function')
 def client(app):
+    """Skapa en testklient för Flask-applikationen"""
     return app.test_client()
 
-@pytest.fixture
-def test_user(app):
-    user = User(namn="Testare", email="test@example.com", roll="admin")
-    user.set_password("test123")
-    db.session.add(user)
-    db.session.commit()
-    return user
+
+@pytest.fixture(scope='function')
+def runner(app):
+    """Skapa en testrunner för Flask CLI-kommandon"""
+    return app.test_cli_runner()
+
+
+@pytest.fixture(scope='function')
+def admin_token(client):
+    """Skapa en giltig admin-token för testning"""
+    response = client.post('/auth/login', json={
+        'email': 'admin@test.com',
+        'lösenord': 'Testpassword1'
+    })
+    return response.json['token']
+
+
+@pytest.fixture(scope='function')
+def user_token(client):
+    """Skapa en giltig användar-token för testning"""
+    response = client.post('/auth/login', json={
+        'email': 'user@test.com',
+        'lösenord': 'Testpassword1'
+    })
+    return response.json['token']
