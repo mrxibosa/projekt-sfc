@@ -1,13 +1,18 @@
-from flask import Flask
-from models import db
-import os
-
-app = Flask(__name__)
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://postgres:admin@localhost:5432/solvaders_fc')
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db.init_app(app)
+# create_tables.py
+from app import app
+from models import db, User, Lag, Match, Träning
 
 with app.app_context():
+    # Create all tables
     db.create_all()
-    print("✅ Alla tabeller skapade eller uppdaterade!")
+    print("✅ Tables created successfully!")
+
+    # Check if the 'roll' column exists in the User model
+    inspector = db.inspect(db.engine)
+    columns = inspector.get_columns('användare')
+    column_names = [column['name'] for column in columns]
+
+    if 'roll' in column_names:
+        print("✅ 'roll' column exists in User model")
+    else:
+        print("❌ 'roll' column is missing!")

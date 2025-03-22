@@ -1,29 +1,44 @@
-from flask import Blueprint, jsonify, request
-from models import User
+from flask import Blueprint, request, jsonify
+from models import db, User
 import jwt
 import datetime
-import os
 
 auth_routes = Blueprint('auth_routes', __name__)
 
-SECRET_KEY = os.getenv("SECRET_KEY", "superhemlignyckel")
+SECRET_KEY = "superhemlignyckel"
 
 @auth_routes.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    if not data or 'email' not in data or 'lösenord' not in data:
-        return jsonify({"error": "Email och lösenord krävs"}), 400
+    email = data.get('email')
+    lösenord = data.get('lösenord')
 
-    user = User.query.filter_by(email=data['email']).first()
+    user = User.query.filter_by(email=email).first()
+    if not user or not user.check_password(lösenord):
+        return jsonify({"error": "Ogiltig inloggning"}), 401
 
-    if user and user.check_password(data['lösenord']):
-        token_payload = {
-            "user_id": user.id,
-            "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=1)
-        }
-        token = jwt.encode(token_payload, SECRET_KEY, algorithm="HS256")
-        if isinstance(token, bytes):
-            token = token.decode('utf-8')
-        return jsonify({"message": "Inloggad", "token": token}), 200
-    else:
-        return jsonify({"error": "Fel email eller lösenord"}), 401
+    token = jwt.encode({'user_id': user.id, 'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
+                       SECRET_KEY, algorithm="HS256")
+
+    return jsonify({"message": "Inloggad", "token": token}), 200
+
+@auth_routes.route('/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    namn = data.get('namn')
+    email = data.get('email')
+    lösenord = data.get('lösenord')
+
+    if not namn or not email or not lösenord:
+        return jsonify({"error": "Alla fält krävs"}), 400
+
+    user_exists = User.query.filter_by(email=email).first()
+    if user_exists:
+        return jsonify({"error": "E-postadressen är redan registrerad"}), 409
+
+    new_user = User(namn=namn, email=email)
+    new_user.set_password(lösenord)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "Registreringen lyckades"}), 201
