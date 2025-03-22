@@ -1,18 +1,32 @@
-# create_tables.py
-from app import app
-from models import db, User, Lag, Match, Träning
+# setup_postgres.py
+import os
+import sqlalchemy as sa
+from sqlalchemy import create_engine, text
+from app import create_app
+from models import db, User
+
+# Force PostgreSQL connection
+os.environ['DATABASE_URL'] = 'postgresql://postgres:admin@localhost:5432/solvaders_fc'
+app = create_app()  # This should create app with PostgreSQL connection
 
 with app.app_context():
-    # Create all tables
-    db.create_all()
-    print("✅ Tables created successfully!")
+    # Verify we're using PostgreSQL
+    if 'postgresql' not in str(db.engine.url):
+        raise Exception(f"Not connected to PostgreSQL! Current connection: {db.engine.url}")
 
-    # Check if the 'roll' column exists in the User model
-    inspector = db.inspect(db.engine)
+    print(f"✅ Connected to PostgreSQL: {db.engine.url}")
+
+    # Recreate all tables
+    db.drop_all()
+    db.create_all()
+    print("✅ Tables recreated in PostgreSQL")
+
+    # Verify the roll column exists
+    inspector = sa.inspect(db.engine)
     columns = inspector.get_columns('användare')
     column_names = [column['name'] for column in columns]
 
     if 'roll' in column_names:
-        print("✅ 'roll' column exists in User model")
+        print("✅ 'roll' column exists in PostgreSQL användare table")
     else:
-        print("❌ 'roll' column is missing!")
+        print("❌ 'roll' column is missing from PostgreSQL!")
